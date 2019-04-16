@@ -1,0 +1,16 @@
+name: potrace
+version: 1.0.0+0
+description: Flutter port of Potrace polygon tracer 
+author: Green Appers, Inc. <greenappers@gmail.com>
+homepage: https://github.com/GreenAppers/flutter_potrace
+documentation: https://github.com/GreenAppers/flutter_potrace/wiki
+
+environment:
+  sdk: ">=2.1.0 <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  image: ^2.0.7
+
