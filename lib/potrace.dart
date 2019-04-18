@@ -10,23 +10,31 @@ import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
-String Potrace(img.Image image, {
+String potrace(img.Image image, {
   String turnpolicy = "minority",
-  num turdsize = 2,
+  int turdsize = 2,
   bool optcurve = true,
   num alphamax = 1,
   num opttolerance = 0.2,
 }) {
   _Bitmap bm = _Bitmap.fromImg(image);
   List<_Path> pathlist = _BitmapToPathlist(bm, turnpolicy, turdsize).run();
-  ProcessPath(optcurve, alphamax, opttolerance).run(pathlist);
-  return GetSVG(bm, 1.0, "", pathlist).run();
+  _ProcessPath(optcurve, alphamax, opttolerance).run(pathlist);
+  String ret = _GetSVG(bm, 1.0, "", pathlist).run();
+  return ret;
 }
 
 class _Point {
-  num x, y;
+  int x, y;
   _Point([this.x=0, this.y=0]);
   _Point copy() => _Point(x, y);
+}
+
+class _DPoint {
+  num x, y;
+  _DPoint([this.x=0, this.y=0]);
+  _DPoint.fromPoint(_Point p) : this(p.x, p.y);
+  _DPoint copy() => _DPoint(x, y);
 }
 
 class _Bitmap {
@@ -71,20 +79,24 @@ class _Bitmap {
 
 class _Curve {
   int n;
-  bool alphacurve = false;
-  List<_Point> vertex, c;
   List<String> tag;
+  List<_DPoint> vertex, c;
+  bool alphacurve = false;
   List<num> alpha, alpha0, beta;
 
   _Curve(this.n) : tag=List(n), c=List(n*3), vertex=List(n), alpha=List(n), alpha0=List(n), beta=List(n);
 }
 
 class _Path {
-  num area = 0, len = 0, minX = 100000, minY = 100000, maxX= -1, maxY = -1, x0, y0;
+  int len = 0;
   List<_Point> pt = <_Point>[];
+  List<int> lon = <int>[];
+  int x0, y0, m;
   List<_Sum> sums = <_Sum>[];
-  List<num> po = <num>[];
+  List<int> po = <int>[];
   _Curve curve;
+
+  num area = 0, minX = 100000, minY = 100000, maxX= -1, maxY = -1;
   String sign;
 }
 
@@ -95,7 +107,7 @@ class _Quad {
 
 class _Opti {
   num pen = 0, t = 0, s = 0, alpha = 0;
-  List<_Point> c = List<_Point>(2);
+  List<_DPoint> c = List<_DPoint>(2);
 }
 
 class _Sum {
@@ -106,11 +118,11 @@ class _Sum {
 class _BitmapToPathlist {
   _Bitmap bm, bm1;
   String turnpolicy;
-  num turdsize;
-  _BitmapToPathlist(_Bitmap BM, this.turnpolicy, this.turdsize) : bm=BM, bm1=BM.copy();
+  int turdsize;
+  _BitmapToPathlist(_Bitmap bM, this.turnpolicy, this.turdsize) : bm=bM, bm1=bM.copy();
 
   _Point findNext(_Point point) {
-    var i = bm1.w * point.y + point.x;
+    int i = bm1.w * point.y + point.x;
     while (i < bm1.size && bm1.data[i] != 1) {
       i++;
     }
@@ -118,10 +130,9 @@ class _BitmapToPathlist {
   }
 
   bool majority(int x, int y) {
-    var i, a, ct;
-    for (i = 2; i < 5; i++) {
-      ct = 0;
-      for (a = -i + 1; a <= i - 1; a++) {
+    for (int i = 2; i < 5; i++) {
+      int ct = 0;
+      for (int a = -i + 1; a <= i - 1; a++) {
         ct += bm1.at(x + a, y + i - 1) ? 1 : -1;
         ct += bm1.at(x + i - 1, y + a - 1) ? 1 : -1;
         ct += bm1.at(x + a - 1, y - i) ? 1 : -1;
@@ -137,13 +148,13 @@ class _BitmapToPathlist {
   }
 
   _Path findPath(_Point point) {
-    var path = _Path();
-    num x = point.x, y = point.y, dirx = 0, diry = 1, tmp;
+    _Path path = _Path();
+    int x = point.x, y = point.y, dirx = 0, diry = 1, tmp;
 
     path.sign = bm.at(point.x, point.y) ? "+" : "-";
 
     while (true) {
-      path.pt.add(new _Point(x, y));
+      path.pt.add(_Point(x, y));
       if (x > path.maxX)
         path.maxX = x;
       if (x < path.minX)
@@ -161,8 +172,8 @@ class _BitmapToPathlist {
       if (x == point.x && y == point.y)
         break;
 
-      var l = bm1.at(x + (dirx + diry - 1 ) / 2, y + (diry - dirx - 1) / 2);
-      var r = bm1.at(x + (dirx - diry - 1) / 2, y + (diry + dirx - 1) / 2);
+      bool l = bm1.at(x + (dirx + diry - 1) ~/ 2, y + (diry - dirx - 1) ~/ 2);
+      bool r = bm1.at(x + (dirx - diry - 1) ~/ 2, y + (diry + dirx - 1) ~/ 2);
 
       if (r && !l) {
         if (turnpolicy == "right" ||
@@ -192,15 +203,15 @@ class _BitmapToPathlist {
   }
 
   void xorPath(_Path path) {
-    num y1 = path.pt[0].y, len = path.len;
+    int y1 = path.pt[0].y, len = path.len;
 
     for (int i = 1; i < len; i++) {
-      num x = path.pt[i].x;
-      num y = path.pt[i].y;
+      int x = path.pt[i].x;
+      int y = path.pt[i].y;
 
       if (y != y1) {
-        num minY = y1 < y ? y1 : y;
-        num maxX = path.maxX;
+        int minY = y1 < y ? y1 : y;
+        int maxX = path.maxX;
         for (int j = x; j < maxX; j++) {
           bm1.flip(j, minY);
         }
@@ -226,21 +237,21 @@ class _BitmapToPathlist {
   }
 }
 
-class ProcessPath {
+class _ProcessPath {
   bool optcurve;
   num alphamax, opttolerance;
 
-  ProcessPath(this.optcurve, this.alphamax, this.opttolerance);
+  _ProcessPath(this.optcurve, this.alphamax, this.opttolerance);
 
-  static num mod(a, n) {
+  static int mod(int a, int n) {
     return a >= n ? a % n : a>=0 ? a : n-1-(-1-a) % n;
   }
 
-  static num xprod(p1, p2) {
+  static int xprod(_Point p1, _Point p2) {
     return p1.x * p2.y - p1.y * p2.x;
   }
 
-  static bool cyclic(a, b, c) {
+  static bool cyclic(int a, int b, int c) {
     if (a <= c) {
       return (a <= b && b < c);
     } else {
@@ -248,11 +259,11 @@ class ProcessPath {
     }
   }
 
-  static num sign(i) {
+  static num sign(num i) {
     return i > 0 ? 1 : i < 0 ? -1 : 0;
   }
 
-  static num quadform(_Quad Q, _Point w) {
+  static num quadform(_Quad Q, _DPoint w) {
     List<num> v = <num>[ w.x, w.y, 1 ];
     num sum = 0.0;
   
@@ -264,77 +275,68 @@ class ProcessPath {
     return sum;
   }
 
-  static _Point interval(num lambda, _Point a, _Point b) {
-    return _Point(a.x + lambda * (b.x - a.x), a.y + lambda * (b.y - a.y));
+  static _DPoint interval(num lambda, _DPoint a, _DPoint b) {
+    return _DPoint(a.x + lambda * (b.x - a.x), a.y + lambda * (b.y - a.y));
   }
 
-  static _Point dorth_infty(_Point p0, _Point p2) {
+  static _Point dorthInfty(_DPoint p0, _DPoint p2) {
     return _Point(sign(p2.x - p0.x), -sign(p2.y - p0.y));
   }
 
-  static num ddenom(_Point p0, _Point p2) {
-    _Point r = dorth_infty(p0, p2);
+  static num ddenom(_DPoint p0, _DPoint p2) {
+    _Point r = dorthInfty(p0, p2);
     return r.y * (p2.x - p0.x) - r.x * (p2.y - p0.y);
   }
 
-  static num dpara(_Point p0, _Point p1, _Point p2) {
-    var x1, y1, x2, y2;
-
-    x1 = p1.x - p0.x;
-    y1 = p1.y - p0.y;
-    x2 = p2.x - p0.x;
-    y2 = p2.y - p0.y;
+  static num dpara(_DPoint p0, _DPoint p1, _DPoint p2) {
+    num x1 = p1.x - p0.x;
+    num y1 = p1.y - p0.y;
+    num x2 = p2.x - p0.x;
+    num y2 = p2.y - p0.y;
 
     return x1 * y2 - x2 * y1;
   }
 
-  static num cprod(_Point p0, _Point p1, _Point p2, _Point p3) {
-    var x1, y1, x2, y2;
-
-    x1 = p1.x - p0.x;
-    y1 = p1.y - p0.y;
-    x2 = p3.x - p2.x;
-    y2 = p3.y - p2.y;
+  static num cprod(_DPoint p0, _DPoint p1, _DPoint p2, _DPoint p3) {
+    num x1 = p1.x - p0.x;
+    num y1 = p1.y - p0.y;
+    num x2 = p3.x - p2.x;
+    num y2 = p3.y - p2.y;
 
     return x1 * y2 - x2 * y1;
   }
 
-  static num iprod(p0, p1, p2) {
-    var x1, y1, x2, y2;
-
-    x1 = p1.x - p0.x;
-    y1 = p1.y - p0.y;
-    x2 = p2.x - p0.x;
-    y2 = p2.y - p0.y;
+  static num iprod(_DPoint p0, _DPoint p1, _DPoint p2) {
+    num x1 = p1.x - p0.x;
+    num y1 = p1.y - p0.y;
+    num x2 = p2.x - p0.x;
+    num y2 = p2.y - p0.y;
 
     return x1*x2 + y1*y2;
   }
 
-  static num iprod1(p0, p1, p2, p3) {
-    var x1, y1, x2, y2;
-
-    x1 = p1.x - p0.x;
-    y1 = p1.y - p0.y;
-    x2 = p3.x - p2.x;
-    y2 = p3.y - p2.y;
+  static num iprod1(_DPoint p0, _DPoint p1, _DPoint p2, _DPoint p3) {
+    num x1 = p1.x - p0.x;
+    num y1 = p1.y - p0.y;
+    num x2 = p3.x - p2.x;
+    num y2 = p3.y - p2.y;
 
     return x1 * x2 + y1 * y2;
   }
 
-  static num ddist(p, q) {
+  static num ddist(_DPoint p, _DPoint q) {
     return Math.sqrt((p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y));
   }
 
-  static _Point bezier(t, p0, p1, p2, p3) {
-    var s = 1 - t, res = new _Point();
-
-    res.x = s*s*s*p0.x + 3*(s*s*t)*p1.x + 3*(t*t*s)*p2.x + t*t*t*p3.x;
-    res.y = s*s*s*p0.y + 3*(s*s*t)*p1.y + 3*(t*t*s)*p2.y + t*t*t*p3.y;
-
-    return res;
+  static _DPoint bezier(num t, _DPoint p0, _DPoint p1, _DPoint p2, _DPoint p3) {
+    num s = 1 - t;
+    return _DPoint(
+      s*s*s*p0.x + 3*(s*s*t)*p1.x + 3*(t*t*s)*p2.x + t*t*t*p3.x,
+      s*s*s*p0.y + 3*(s*s*t)*p1.y + 3*(t*t*s)*p2.y + t*t*t*p3.y,
+    );
   }
 
-  static num tangent(_Point p0, _Point p1, _Point p2, _Point p3, _Point q0, _Point q1) {
+  static num tangent(_DPoint p0, _DPoint p1, _DPoint p2, _DPoint p3, _DPoint q0, _DPoint q1) {
     num A = cprod(p0, p1, q0, q1);
     num B = cprod(p1, p2, q0, q1);
     num C = cprod(p2, p3, q0, q1);
@@ -368,18 +370,19 @@ class ProcessPath {
     path.y0 = path.pt[0].y;
 
     path.sums = <_Sum>[];
-    var s = path.sums;
+    List<_Sum> s = path.sums;
     s.add(_Sum(0, 0, 0, 0, 0));
 
     for (int i = 0; i < path.len; i++) {
-      num x = path.pt[i].x - path.x0;
-      num y = path.pt[i].y - path.y0;
+      int x = path.pt[i].x - path.x0;
+      int y = path.pt[i].y - path.y0;
       s.add(_Sum(s[i].x + x, s[i].y + y, s[i].xy + x * y, s[i].x2 + x * x, s[i].y2 + y * y));
     }
   }
  
-  static void calcLon(path) {
-    var n = path.len, pt = path.pt, dir;
+  static void calcLon(_Path path) {
+    int dir, n = path.len;
+    List<_Point> pt = path.pt;
     List<num> pivk = List(n), nc = List(n), ct = List(4);
     path.lon = List(n);
 
@@ -387,7 +390,7 @@ class ProcessPath {
     _Point cur = _Point(), off = _Point(), dk = _Point();
     bool foundk;
 
-    num i, j, k1, a, b, c, d, k = 0;
+    int i, j, k1, a, b, c, d, k = 0;
     for( i = n - 1; i >= 0; i--){
       if (pt[i].x != pt[k].x && pt[i].y != pt[k].y) {
         k = i + 1;
@@ -397,8 +400,7 @@ class ProcessPath {
     
     for (i = n - 1; i >= 0; i--) {
       ct[0] = ct[1] = ct[2] = ct[3] = 0;
-      dir = (3 + 3 * (pt[mod(i + 1, n)].x - pt[i].x) + 
-          (pt[mod(i + 1, n)].y - pt[i].y)) / 2;
+      dir = ((3 + 3 * (pt[mod(i + 1, n)].x - pt[i].x) + (pt[mod(i + 1, n)].y - pt[i].y)) / 2).floor();
       ct[dir]++;
       
       constraint[0].x = 0;
@@ -410,8 +412,7 @@ class ProcessPath {
       k1 = i;
       while (true) {
         foundk = false;
-        dir =  (3 + 3 * sign(pt[k].x - pt[k1].x) + 
-            sign(pt[k].y - pt[k1].y)) / 2;
+        dir = ((3 + 3 * sign(pt[k].x - pt[k1].x) + sign(pt[k].y - pt[k1].y)) / 2).floor();
         ct[dir]++;
         
         if (ct[0] != 0 && ct[1] != 0 && ct[2] != 0 && ct[3] != 0) {
@@ -485,18 +486,19 @@ class ProcessPath {
     }
   }
 
-  static num penalty3(path, i, j) {
-    var n = path.len, pt = path.pt, sums = path.sums;
-    var x, y, xy, x2, y2,
-      k, a, b, c, s,
-      px, py, ex, ey,
-      r = 0;
+  static num penalty3(_Path path, int i, int j) {
+    int n = path.len;
+    List<_Point> pt = path.pt;
+    List<_Sum> sums = path.sums;
+    num x, y, xy, x2, y2, k, a, b, c, s, px, py, ex, ey;
+    bool r = false;
+
     if (j>=n) {
       j -= n;
-      r = 1;
+      r = true;
     }
 
-    if (r == 0) {
+    if (!r) {
       x = sums[j+1].x - sums[i].x;
       y = sums[j+1].y - sums[i].y;
       x2 = sums[j+1].x2 - sums[i].x2;
@@ -526,11 +528,11 @@ class ProcessPath {
     return Math.sqrt(s);
   }
   
-  static void bestPolygon(path) {
-    num i, j, m, k;
-    int n = path.len;
-    List<num> pen = List(n + 1), prev = List(n + 1), clip0 = List(n), clip1 = List(n + 1), seg0 = List(n + 1), seg1 = List(n + 1);
-    num thispen, best, c;
+  static void bestPolygon(_Path path) {
+    int i, j, m, k, c, n = path.len;
+    List<num> pen = List(n + 1);
+    List<int> prev = List(n + 1), clip0 = List(n), clip1 = List(n + 1), seg0 = List(n + 1), seg1 = List(n + 1);
+    num thispen, best;
 
     for (i=0; i<n; i++) {
       c = mod(path.lon[mod(i-1, n)]-1, n);
@@ -591,10 +593,11 @@ class ProcessPath {
     }
   }
 
-  static void pointslope(path, i, j, ctr, dir) {
-    var n = path.len, sums = path.sums,
-      x, y, x2, xy, y2,
-      k, a, b, c, lambda2, l, r=0;
+  static void pointslope(_Path path, int i, int j, _DPoint ctr, _DPoint dir) {
+    int n = path.len;
+    List<_Sum> sums = path.sums;
+    num x, y, x2, xy, y2, k, a, b, c, lambda2, l;
+    int r=0;
   
     while (j>=n) {
       j-=n;
@@ -650,26 +653,29 @@ class ProcessPath {
     }
   }
   
-  static void adjustVertices(path) {
-    var m = path.m, po = path.po, n = path.len, pt = path.pt, x0 = path.x0, y0 = path.y0;
-    List<_Point> ctr = List(m), dir = List(m);
+  static void adjustVertices(_Path path) {
+    int n = path.len, m = path.m, x0 = path.x0, y0 = path.y0;
+    List<int> po = path.po;
+    List<_Point> pt = path.pt;
+    List<_DPoint> ctr = List(m), dir = List(m);
     List<_Quad> q = List(m);
     List<num> v = List(3);
-    _Point s = _Point();
-    num d, i, j, k, l;
+    int i, j, k, l;
+    _DPoint s = _DPoint();
+    num d;
 
-    path.curve = new _Curve(m);
+    path.curve = _Curve(m);
 
     for (i=0; i<m; i++) {
       j = po[mod(i+1,m)];
       j = mod(j-po[i],n)+po[i];
-      ctr[i] = new _Point();
-      dir[i] = new _Point();
+      ctr[i] = _DPoint();
+      dir[i] = _DPoint();
       pointslope(path, po[i], j, ctr[i], dir[i]);
     }
   
     for (i=0; i<m; i++) {
-      q[i] = new _Quad();
+      q[i] = _Quad();
       d = dir[i].x * dir[i].x + dir[i].y * dir[i].y;
       if (d == 0.0) {
         for (j=0; j<3; j++) {
@@ -688,14 +694,17 @@ class ProcessPath {
         }
       }
     }
-   
-    var Q, w, dx, dy, det, min, cand, xmin, ymin, z;
-    for (i=0; i<m; i++) {
-      Q = new _Quad();
-      w = new _Point();
   
-      s.x = pt[po[i]].x-x0;
-      s.y = pt[po[i]].y-y0;
+    _Quad Q;
+    _DPoint w;
+    num dx, dy, det, min, cand, xmin, ymin;
+    int z;
+    for (i=0; i<m; i++) {
+      Q = _Quad();
+      w = _DPoint();
+  
+      s.x = (pt[po[i]].x-x0).toDouble();
+      s.y = (pt[po[i]].y-y0).toDouble();
   
       j = mod(i-1,m);
       
@@ -716,7 +725,7 @@ class ProcessPath {
         if (Q.at(0, 0)>Q.at(1, 1)) {
           v[0] = -Q.at(0, 1);
           v[1] = Q.at(0, 0);
-        } else if (Q.at(1, 1)) {
+        } else if (Q.at(1, 1) != 0) {
           v[0] = -Q.at(1, 1);
           v[1] = Q.at(1, 0);
         } else {
@@ -734,7 +743,7 @@ class ProcessPath {
       dx = (w.x-s.x).abs();
       dy = (w.y-s.y).abs();
       if (dx <= 0.5 && dy <= 0.5) {
-        path.curve.vertex[i] = new _Point(w.x+x0, w.y+y0);
+        path.curve.vertex[i] = _DPoint(w.x+x0, w.y+y0);
         continue;
       }
   
@@ -783,25 +792,28 @@ class ProcessPath {
         }
       }
 
-      path.curve.vertex[i] = new _Point(xmin + x0, ymin + y0);
+      path.curve.vertex[i] = _DPoint(xmin + x0, ymin + y0);
     }
   }
   
-  static void reverse(path) {
-    var curve = path.curve, m = curve.n, v = curve.vertex, tmp;
+  static void reverse(_Path path) {
+    _Curve curve = path.curve;
+    int m = curve.n;
+    List<_DPoint> v = curve.vertex;
 
     for (int i=0, j=m-1; i<j; i++, j--) {
-      tmp = v[i];
+      _DPoint tmp = v[i];
       v[i] = v[j];
       v[j] = tmp;
     }
   }
 
   void smooth(_Path path) {
-    var m = path.curve.n, curve = path.curve;
-
-    var i, j, k, dd, denom, alpha,
-      p2, p3, p4;
+    int m = path.curve.n;
+    int i, j, k;
+    num dd, denom, alpha;
+    _DPoint p2, p3, p4;
+    _Curve curve = path.curve;
 
     for (i=0; i<m; i++) {
       j = mod(i+1, m);
@@ -842,13 +854,14 @@ class ProcessPath {
     curve.alphacurve = true;
   }
 
-  static bool opti_penalty(path, i, j, res, opttolerance, convc, areac) {
-    var m = path.curve.n, curve = path.curve, vertex = curve.vertex, 
-      k, k1, k2, conv, i1,
-      area, alpha, d, d1, d2,
-      p0, p1, p2, p3, pt,
-      A, R, A1, A2, A3, A4,
-      s, t;
+  static bool optiPenalty(_Path path, int i, int j, _Opti res, num opttolerance, List<num> convc, List<num> areac) {
+    int m = path.curve.n;
+    int k, k1, k2, conv, i1;
+    num area, alpha, d, d1, d2;
+    _DPoint p0, p1, p2, p3, pt;
+    num A, R, a1, a2, a3, a4, s, t;
+    _Curve curve = path.curve;
+    List<_DPoint> vertex = curve.vertex;
 
     if (i==j) {
       return true;
@@ -889,19 +902,19 @@ class ProcessPath {
       area += areac[m];
     }
 
-    A1 = dpara(p0, p1, p2);
-    A2 = dpara(p0, p1, p3);
-    A3 = dpara(p0, p2, p3);
+    a1 = dpara(p0, p1, p2);
+    a2 = dpara(p0, p1, p3);
+    a3 = dpara(p0, p2, p3);
 
-    A4 = A1+A3-A2;    
+    a4 = a1+a3-a2;    
 
-    if (A2 == A1) {
+    if (a2 == a1) {
       return true;
     }
 
-    t = A3/(A3-A4);
-    s = A2/(A2-A1);
-    A = A2 * t / 2.0;
+    t = a3/(a3-a4);
+    s = a2/(a2-a1);
+    A = a2 * t / 2.0;
 
     if (A == 0.0) {
       return true;
@@ -973,12 +986,16 @@ class ProcessPath {
   }
 
   void optiCurve(_Path path) { 
-    var curve = path.curve, m = curve.n, vert = curve.vertex; 
-    List<num> pt = List(m + 1), pen = List(m + 1), len = List(m + 1), convc = List(m), areac = List(m + 1);
+    _Curve curve = path.curve;
+    int m = curve.n, i, j, om, i1;
+    List<_DPoint> vert = curve.vertex; 
+    List<int> pt = List(m + 1), len = List(m + 1), convc = List(m);
+    List<num> pen = List(m + 1), areac = List(m + 1);
     List<_Opti> opt = List(m + 1);
-    num om, i, j;
     _Opti o = _Opti();
-    var p0, i1, area, alpha, ocurve;
+    _DPoint p0;
+    num area, alpha;
+    _Curve ocurve;
 
     for (i=0; i<m; i++) {
       if (curve.tag[i] == "CURVE") {
@@ -1013,7 +1030,7 @@ class ProcessPath {
       len[j] = len[j-1]+1;
   
       for (i=j-2; i>=0; i--) {
-        bool r = opti_penalty(path, i, mod(j,m), o, opttolerance, convc, 
+        bool r = optiPenalty(path, i, mod(j,m), o, opttolerance, convc, 
             areac);
         if (r) {
           break;
@@ -1024,7 +1041,7 @@ class ProcessPath {
             pen[j] = pen[i] + o.pen;
             len[j] = len[i] + 1;
             opt[j] = o;
-            o = new _Opti();
+            o = _Opti();
           }
       }
     }
@@ -1069,7 +1086,7 @@ class ProcessPath {
  
   void run(List<_Path> pathlist) {
     for (int i = 0; i < pathlist.length; i++) {
-      var path = pathlist[i];
+      _Path path = pathlist[i];
       calcSums(path);
       calcLon(path);
       bestPolygon(path);
@@ -1086,35 +1103,35 @@ class ProcessPath {
   }
 }
 
-class GetSVG {
+class _GetSVG {
   _Bitmap bm;
   num size;
-  String opt_type;
+  String optType;
   List<_Path> pathlist;
-  GetSVG(this.bm, this.size, this.opt_type, this.pathlist);
+  _GetSVG(this.bm, this.size, this.optType, this.pathlist);
 
-  String bezier(curve, i) {
-    String b = 'C ' + (curve.c[i * 3 + 0].x * size).toFixed(3) + ' ' +
-        (curve.c[i * 3 + 0].y * size).toFixed(3) + ',';
-    b += (curve.c[i * 3 + 1].x * size).toFixed(3) + ' ' +
-        (curve.c[i * 3 + 1].y * size).toFixed(3) + ',';
-    b += (curve.c[i * 3 + 2].x * size).toFixed(3) + ' ' +
-        (curve.c[i * 3 + 2].y * size).toFixed(3) + ' ';
+  String bezier(_Curve curve, int i) {
+    String b = 'C ' + (curve.c[i * 3 + 0].x * size).toStringAsFixed(3) + ' ' +
+        (curve.c[i * 3 + 0].y * size).toStringAsFixed(3) + ',';
+    b += (curve.c[i * 3 + 1].x * size).toStringAsFixed(3) + ' ' +
+        (curve.c[i * 3 + 1].y * size).toStringAsFixed(3) + ',';
+    b += (curve.c[i * 3 + 2].x * size).toStringAsFixed(3) + ' ' +
+        (curve.c[i * 3 + 2].y * size).toStringAsFixed(3) + ' ';
     return b;
   }
 
-  String segment(curve, i) {
-    String s = 'L ' + (curve.c[i * 3 + 1].x * size).toFixed(3) + ' ' +
-        (curve.c[i * 3 + 1].y * size).toFixed(3) + ' ';
-    s += (curve.c[i * 3 + 2].x * size).toFixed(3) + ' ' +
-        (curve.c[i * 3 + 2].y * size).toFixed(3) + ' ';
+  String segment(_Curve curve, int i) {
+    String s = 'L ' + (curve.c[i * 3 + 1].x * size).toStringAsFixed(3) + ' ' +
+        (curve.c[i * 3 + 1].y * size).toStringAsFixed(3) + ' ';
+    s += (curve.c[i * 3 + 2].x * size).toStringAsFixed(3) + ' ' +
+        (curve.c[i * 3 + 2].y * size).toStringAsFixed(3) + ' ';
     return s;
   }
 
-  String path(curve) {
-    var n = curve.n;
-    String p = 'M' + (curve.c[(n - 1) * 3 + 2].x * size).toFixed(3) +
-        ' ' + (curve.c[(n - 1) * 3 + 2].y * size).toFixed(3) + ' ';
+  String path(_Curve curve) {
+    int n = curve.n;
+    String p = 'M' + (curve.c[(n - 1) * 3 + 2].x * size).toStringAsFixed(3) +
+        ' ' + (curve.c[(n - 1) * 3 + 2].y * size).toStringAsFixed(3) + ' ';
     for (int i = 0; i < n; i++) {
       if (curve.tag[i] == "CURVE") {
         p += bezier(curve, i);
@@ -1122,22 +1139,23 @@ class GetSVG {
         p += segment(curve, i);
       }
     }
-    //p += 
     return p;
   }
 
   String run() {
-    var w = bm.w * size, h = bm.h * size,
-      len = pathlist.length, c, i, strokec, fillc, fillrule;
+    int len = pathlist.length;
+    num w = bm.w * size, h = bm.h * size;
+    String strokec, fillc, fillrule;
+    _Curve c;
 
     String  svg = '<svg id="svg" version="1.1" width="' + w.toString() + '" height="' + h.toString() +
         '" xmlns="http://www.w3.org/2000/svg">';
     svg += '<path d="';
-    for (i = 0; i < len; i++) {
+    for (int i = 0; i < len; i++) {
       c = pathlist[i].curve;
       svg += path(c);
     }
-    if (opt_type == "curve") {
+    if (optType == "curve") {
       strokec = "black";
       fillc = "none";
       fillrule = '';
