@@ -7,22 +7,48 @@
 
 import 'dart:math' as Math;
 import 'dart:typed_data';
+import 'dart:ui';
 
 import 'package:image/image.dart' as img;
 
-String potrace(img.Image image, {
+/**
+ * Create SVG from image [src]
+ */
+
+String potrace(img.Image src, {
   String turnpolicy = "minority",
   int turdsize = 2,
   bool optcurve = true,
   num alphamax = 1,
   num opttolerance = 0.2,
 }) {
-  _Bitmap bm = _Bitmap.fromImg(image);
+  _Bitmap bm = _Bitmap.fromImg(src);
   List<_Path> pathlist = _BitmapToPathlist(bm, turnpolicy, turdsize).run();
   _ProcessPath(optcurve, alphamax, opttolerance).run(pathlist);
-  String ret = _GetSVG(bm, 1.0, "", pathlist).run();
-  return ret;
+  return _GetSVG(bm, 1.0, "", pathlist).run();
 }
+
+/**
+ * Create Flutter Path from mask [src]
+ */
+
+Path potraceMask(Uint8List src, int width, int height, {
+  String turnpolicy = "minority",
+  int turdsize = 2,
+  bool optcurve = true,
+  num alphamax = 1,
+  num opttolerance = 0.2,
+}) {
+  _Bitmap bm = _Bitmap.fromData(width, height, src);
+  List<_Path> pathlist = _BitmapToPathlist(bm, turnpolicy, turdsize).run();
+  _ProcessPath(optcurve, alphamax, opttolerance).run(pathlist);
+  return _GetPath(bm, 1.0, "", pathlist).run();
+}
+
+/**
+ * Peter Selinger (2003). Potrace: a polygon-based tracing algorithm.
+ * http://potrace.sourceforge.net/potrace.pdf
+ */
 
 class _Point {
   int x, y;
@@ -42,6 +68,8 @@ class _Bitmap {
   Uint8List data;
 
   _Bitmap(this.w, this.h) : size=w*h, data=Uint8List(w*h);
+
+  _Bitmap.fromData(this.w, this.h, this.data) : size=w*h;
 
   _Bitmap.fromImg(img.Image image) : w=image.width, h=image.height, size=image.width*image.height, data=Uint8List(image.width*image.height) {
     for (int i = 0; i < image.length; i++) {
@@ -1021,8 +1049,7 @@ class _ProcessPath {
   
     pt[0] = -1;
     pen[0] = 0;
-    len[0] = 0;
-  
+    len[0] = 0; 
   
     for (j=1; j<=m; j++) {
       pt[j] = j-1;
@@ -1111,50 +1138,52 @@ class _GetSVG {
   _GetSVG(this.bm, this.size, this.optType, this.pathlist);
 
   String bezier(_Curve curve, int i) {
-    String b = 'C ' + (curve.c[i * 3 + 0].x * size).toStringAsFixed(3) + ' ' +
-        (curve.c[i * 3 + 0].y * size).toStringAsFixed(3) + ',';
-    b += (curve.c[i * 3 + 1].x * size).toStringAsFixed(3) + ' ' +
-        (curve.c[i * 3 + 1].y * size).toStringAsFixed(3) + ',';
-    b += (curve.c[i * 3 + 2].x * size).toStringAsFixed(3) + ' ' +
-        (curve.c[i * 3 + 2].y * size).toStringAsFixed(3) + ' ';
-    return b;
+    return 'C '
+      + (curve.c[i * 3 + 0].x * size).toStringAsFixed(3) + ' '
+      + (curve.c[i * 3 + 0].y * size).toStringAsFixed(3) + ','
+      + (curve.c[i * 3 + 1].x * size).toStringAsFixed(3) + ' '
+      + (curve.c[i * 3 + 1].y * size).toStringAsFixed(3) + ','
+      + (curve.c[i * 3 + 2].x * size).toStringAsFixed(3) + ' '
+      + (curve.c[i * 3 + 2].y * size).toStringAsFixed(3) + ' ';
   }
 
   String segment(_Curve curve, int i) {
-    String s = 'L ' + (curve.c[i * 3 + 1].x * size).toStringAsFixed(3) + ' ' +
-        (curve.c[i * 3 + 1].y * size).toStringAsFixed(3) + ' ';
-    s += (curve.c[i * 3 + 2].x * size).toStringAsFixed(3) + ' ' +
-        (curve.c[i * 3 + 2].y * size).toStringAsFixed(3) + ' ';
-    return s;
+    return 'L '
+      + (curve.c[i * 3 + 1].x * size).toStringAsFixed(3) + ' '
+      + (curve.c[i * 3 + 1].y * size).toStringAsFixed(3) + ' '
+      + (curve.c[i * 3 + 2].x * size).toStringAsFixed(3) + ' '
+      + (curve.c[i * 3 + 2].y * size).toStringAsFixed(3) + ' ';
   }
 
   String path(_Curve curve) {
     int n = curve.n;
-    String p = 'M' + (curve.c[(n - 1) * 3 + 2].x * size).toStringAsFixed(3) +
-        ' ' + (curve.c[(n - 1) * 3 + 2].y * size).toStringAsFixed(3) + ' ';
+    String p = 'M'
+      + (curve.c[(n - 1) * 3 + 2].x * size).toStringAsFixed(3) + ' '
+      + (curve.c[(n - 1) * 3 + 2].y * size).toStringAsFixed(3) + ' ';
+
     for (int i = 0; i < n; i++) {
-      if (curve.tag[i] == "CURVE") {
-        p += bezier(curve, i);
-      } else if (curve.tag[i] == "CORNER") {
-        p += segment(curve, i);
+      switch(curve.tag[i]) {
+        case 'CURVE':
+          p += bezier(curve, i);
+          break;
+
+        case 'CORNER':
+          p += segment(curve, i);
+          break;
       }
     }
     return p;
   }
 
   String run() {
-    int len = pathlist.length;
     num w = bm.w * size, h = bm.h * size;
-    String strokec, fillc, fillrule;
-    _Curve c;
+    String svg = '<svg id="svg" version="1.1" width="' + w.toString() + '" height="' + h.toString() + '" xmlns="http://www.w3.org/2000/svg">';
 
-    String  svg = '<svg id="svg" version="1.1" width="' + w.toString() + '" height="' + h.toString() +
-        '" xmlns="http://www.w3.org/2000/svg">';
     svg += '<path d="';
-    for (int i = 0; i < len; i++) {
-      c = pathlist[i].curve;
-      svg += path(c);
-    }
+    for (int i = 0; i < pathlist.length; i++)
+      svg += path(pathlist[i].curve);
+
+    String strokec, fillc, fillrule;
     if (optType == "curve") {
       strokec = "black";
       fillc = "none";
@@ -1164,7 +1193,56 @@ class _GetSVG {
       fillc = "black";
       fillrule = ' fill-rule="evenodd"';
     }
+
     svg += '" stroke="' + strokec + '" fill="' + fillc + '"' + fillrule + '/></svg>';
     return svg;
+  }
+}
+
+class _GetPath {
+  _Bitmap bm;
+  num size;
+  String optType;
+  List<_Path> pathlist;
+  Path ret = Path();
+  _GetPath(this.bm, this.size, this.optType, this.pathlist);
+
+  void path(_Curve curve) {
+    int n = curve.n;
+    ret.moveTo(
+      curve.c[(n - 1) * 3 + 2].x * size,
+      curve.c[(n - 1) * 3 + 2].y * size);
+
+    for (int i = 0; i < n; i++) {
+      switch(curve.tag[i]) {
+        case 'CURVE':
+          ret.cubicTo(
+            curve.c[i * 3 + 0].x * size,
+            curve.c[i * 3 + 0].y * size,
+            curve.c[i * 3 + 1].x * size,
+            curve.c[i * 3 + 1].y * size,
+            curve.c[i * 3 + 2].x * size,
+            curve.c[i * 3 + 2].y * size
+          );
+          break;
+
+        case 'CORNER':
+          ret.lineTo(
+            curve.c[i * 3 + 1].x * size,
+            curve.c[i * 3 + 1].y * size
+          );
+          ret.lineTo(
+            curve.c[i * 3 + 2].x * size,
+            curve.c[i * 3 + 2].y * size
+          );
+          break;
+      }
+    }
+  }
+
+  Path run() {
+    for (int i = 0; i < pathlist.length; i++) 
+      path(pathlist[i].curve);
+    return ret;
   }
 }
